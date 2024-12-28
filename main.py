@@ -2,6 +2,7 @@ import skimage.feature as imgfeature
 import numpy as np
 from skimage.io import imread
 from skimage.color import rgb2gray
+from skimage.util import img_as_int
 import skimage.transform as transform
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -10,6 +11,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 import random
+from joblib import Parallel, delayed
+import time
 
 # Get all image name
 def getImageName(imgPathStr):
@@ -23,39 +26,56 @@ def getImageName(imgPathStr):
             imgList.append(item)
     return imgList
 
-# Process image
-def processImage(imgList):
+# Process single image
+def processImage(filePath, currentId, totalCount):
+    print(f"processing image {filePath.name} ({currentId}/{totalCount})...")
+    isCat = 0
+    if filePath.name.startswith("cat"):
+        isCat = 1
+
+    try:
+        image = imread(filePath)
+    except OSError as e:
+        print(f"Cannot open image file {filePath.name} bacause\n{e}")
+        return None, None
+    
+    image = transform.resize(image, (256, 256))
+    grayImage = rgb2gray(image)
+
+    hogFeature = imgfeature.hog(grayImage,
+                                orientations=9,
+                                pixels_per_cell=(8, 8),
+                                cells_per_block=(2, 2),
+                                visualize=False,
+                                block_norm='L2-Hys'
+                                )
+    
+    lbpRadius = 3
+    lbpPoint = 3 * lbpRadius
+    lbp = imgfeature.local_binary_pattern(img_as_int(grayImage), R=lbpRadius, P=lbpPoint)
+    binsCount = int(lbp.max() + 1)
+    lbpHist, _ = np.histogram(lbp.ravel(), 
+                              density=True, 
+                              bins=binsCount, 
+                              range=(0, binsCount)
+                              )
+    
+    totalFeature = np.concatenate((hogFeature, lbpHist))
+    return totalFeature, isCat
+    
+# Process all image
+def processAllImage(imgList):
     xData = None
     yData = None
-    index = 0
-    for filename in imgList:
-        isCat = 0
-        if filename.name.startswith("cat"):
-            isCat = 1
 
-        try:
-            image = imread(filename)
-        except OSError as e:
-            print(f"Cannot open image file {filename.name} bacause\n{e}")
+    resultList = Parallel(n_jobs=8)(
+        delayed(processImage)(filePath, currentId, len(imgList)) 
+            for filePath, currentId in zip(imgList, range(1, len(imgList) + 1))
+        )
+
+    for totalFeature, isCat in resultList:
+        if totalFeature is None or isCat is None:
             continue
-        image = transform.resize(image, (256, 256))
-        grayImage = rgb2gray(image)
-
-        hogFeature = imgfeature.hog(grayImage,
-                         orientations=9,
-                         pixels_per_cell=(8, 8),
-                         cells_per_block=(2, 2),
-                         visualize=False,
-                         block_norm='L2-Hys'
-                         )
-
-        lbpRadius = 3
-        lbpPoint = 3 * lbpRadius
-        lbp = imgfeature.local_binary_pattern(grayImage, R=lbpRadius, P=lbpPoint)
-        binsCount = int(lbp.max() + 1)
-        lbpHist, _ = np.histogram(lbp.ravel(), density=True, bins=binsCount, range=(0, binsCount))
-
-        totalFeature = np.concatenate((hogFeature, lbpHist))
 
         if xData is None:
             xData = totalFeature
@@ -66,8 +86,6 @@ def processImage(imgList):
             yData = [isCat]
         else:
             yData.append(isCat)
-        print(f"processing image {filename.name} ({index}/{len(imgList)})...")
-        index += 1
     return xData, yData
 
 catPath = "../AnimalData/cat-db"
@@ -76,9 +94,13 @@ randomPath = "../AnimalData/random"
 imgList = getImageName(catPath)
 imgList.extend(getImageName(randomPath))
 random.shuffle(imgList)
-imgList = imgList[0 : 1000]
-xData, yData = processImage(imgList)
-xTrain, xTest, yTrain, yTest = train_test_split(xData, yData, test_size=0.2, random_state=114514)
+imgList = imgList[0 : 50]
+xData, yData = processAllImage(imgList)
+xTrain, xTest, yTrain, yTest = train_test_split(xData, 
+                                                yData, 
+                                                test_size=0.2, 
+                                                random_state=114514
+                                                )
 
 print("Scaling X...")
 scaler = StandardScaler()
@@ -90,7 +112,7 @@ svm = SVC(kernel='rbf', random_state=114514)
 
 print("Finding best args...")
 params = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001]}
-gridSearch = GridSearchCV(svm, params, cv=5, scoring='accuracy')
+gridSearch = GridSearchCV(svm, params, scoring='accuracy', n_jobs=8)
 gridSearch.fit(xTrain, yTrain)
 
 print("Fitting model...")
