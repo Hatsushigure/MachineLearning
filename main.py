@@ -18,12 +18,8 @@ import time
 
 catPath = "../AnimalData/cat-db"
 randomPath = "../AnimalData/random"
+pictureCount = 1000
 logger = logging.getLogger(__name__)
-logging.basicConfig(stream=stdout, 
-                    level=logging.INFO,
-                    format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S'
-                    )
 
 # Get all image name
 def getImageName(imgPathStr):
@@ -55,7 +51,7 @@ def processImage(filePath, currentId, totalCount):
         logger.warning(f"Cannot open image file {filePath.name} bacause\n{e}")
         return None, None
     
-    image = transform.resize(image, (256, 256))
+    image = transform.resize(image, (128, 128))
     grayImage = rgb2gray(image)
 
     hogFeature = imgfeature.hog(grayImage,
@@ -88,12 +84,10 @@ def processAllImage(imgList):
 
     logger.info(f"Processing all images with {processJobCount} jobs...")
     st = time.time()
-    resultList = Parallel(n_jobs=processJobCount)(
+    resultList = Parallel(n_jobs=processJobCount, return_as="generator_unordered")(
         delayed(processImage)(filePath, currentId, len(imgList)) 
             for filePath, currentId in zip(imgList, range(1, len(imgList) + 1))
         )
-    et = time.time()
-    logger.info(f"Processing completed, costing {et - st:.4f} seconds")
 
     for totalFeature, isCat in resultList:
         if totalFeature is None or isCat is None:
@@ -108,14 +102,21 @@ def processAllImage(imgList):
             yData = [isCat]
         else:
             yData.append(isCat)
+    et = time.time()
+    logger.info(f"Processing completed, costing {et - st:.4f} seconds")
     return xData, yData
 
 def main():
+    logging.basicConfig(stream=stdout, 
+                        level=logging.INFO,
+                        format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S'
+                        )
     logger.info("Program started")
     imgList = getImageName(catPath)
     imgList.extend(getImageName(randomPath))
     random.shuffle(imgList)
-    imgList = imgList[0 : 1000]
+    imgList = imgList[0 : pictureCount]
     xData, yData = processAllImage(imgList)
     xTrain, xTest, yTrain, yTest = train_test_split(xData, 
                                                     yData, 
@@ -129,19 +130,13 @@ def main():
     xTest = scaler.transform(xTest)
 
     logger.info("Building SVM...")
-    svm = SVC(kernel='rbf', random_state=114514)
-
-    logger.info("Finding best args...")
-    params = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001]}
-    gridSearch = GridSearchCV(svm, params, scoring='accuracy', n_jobs=8)
-    gridSearch.fit(xTrain, yTrain)
+    svm = SVC(kernel='rbf', C=100000, random_state=114514)
 
     logger.info("Fitting model...")
-    bestSvm = gridSearch.best_estimator_
-    bestSvm.fit(xTrain, yTrain)
+    svm.fit(xTrain, yTrain)
 
     logger.info("Predicting...")
-    yPred = bestSvm.predict(xTest)
+    yPred = svm.predict(xTest)
     accuracy = accuracy_score(yTest, yPred)
     print(f"Accuracy: {accuracy:.2f}")
 
