@@ -1,3 +1,4 @@
+from sys import stdout
 import skimage.feature as imgfeature
 import numpy as np
 from skimage.io import imread
@@ -12,11 +13,21 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 import random
 from joblib import Parallel, delayed
+import logging
 import time
+
+catPath = "../AnimalData/cat-db"
+randomPath = "../AnimalData/random"
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=stdout, 
+                    level=logging.INFO,
+                    format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                    )
 
 # Get all image name
 def getImageName(imgPathStr):
-    print("Getting filenames...")
+    logger.info(f"Getting filenames from '{imgPathStr}'...")
     imgList = []
     imgPath = Path(imgPathStr)
     for item in imgPath.iterdir():
@@ -28,7 +39,12 @@ def getImageName(imgPathStr):
 
 # Process single image
 def processImage(filePath, currentId, totalCount):
-    print(f"processing image {filePath.name} ({currentId}/{totalCount})...")
+    logging.basicConfig(stream=stdout, 
+                    level=logging.INFO,
+                    format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                    )
+    logger.info(f"Processing image {filePath.name} ({currentId}/{totalCount})...")
     isCat = 0
     if filePath.name.startswith("cat"):
         isCat = 1
@@ -36,7 +52,7 @@ def processImage(filePath, currentId, totalCount):
     try:
         image = imread(filePath)
     except OSError as e:
-        print(f"Cannot open image file {filePath.name} bacause\n{e}")
+        logger.warning(f"Cannot open image file {filePath.name} bacause\n{e}")
         return None, None
     
     image = transform.resize(image, (256, 256))
@@ -61,17 +77,23 @@ def processImage(filePath, currentId, totalCount):
                               )
     
     totalFeature = np.concatenate((hogFeature, lbpHist))
+    logger.info(f"File {filePath.name} processing completed")
     return totalFeature, isCat
     
 # Process all image
 def processAllImage(imgList):
     xData = None
     yData = None
+    processJobCount = 8
 
-    resultList = Parallel(n_jobs=8)(
+    logger.info(f"Processing all images with {processJobCount} jobs...")
+    st = time.time()
+    resultList = Parallel(n_jobs=processJobCount)(
         delayed(processImage)(filePath, currentId, len(imgList)) 
             for filePath, currentId in zip(imgList, range(1, len(imgList) + 1))
         )
+    et = time.time()
+    logger.info(f"Processing completed, costing {et - st:.4f} seconds")
 
     for totalFeature, isCat in resultList:
         if totalFeature is None or isCat is None:
@@ -88,38 +110,40 @@ def processAllImage(imgList):
             yData.append(isCat)
     return xData, yData
 
-catPath = "../AnimalData/cat-db"
-randomPath = "../AnimalData/random"
+def main():
+    logger.info("Program started")
+    imgList = getImageName(catPath)
+    imgList.extend(getImageName(randomPath))
+    random.shuffle(imgList)
+    imgList = imgList[0 : 1000]
+    xData, yData = processAllImage(imgList)
+    xTrain, xTest, yTrain, yTest = train_test_split(xData, 
+                                                    yData, 
+                                                    test_size=0.2, 
+                                                    random_state=114514
+                                                    )
 
-imgList = getImageName(catPath)
-imgList.extend(getImageName(randomPath))
-random.shuffle(imgList)
-imgList = imgList[0 : 50]
-xData, yData = processAllImage(imgList)
-xTrain, xTest, yTrain, yTest = train_test_split(xData, 
-                                                yData, 
-                                                test_size=0.2, 
-                                                random_state=114514
-                                                )
+    logger.info("Scaling X...")
+    scaler = StandardScaler()
+    xTrain = scaler.fit_transform(xTrain)
+    xTest = scaler.transform(xTest)
 
-print("Scaling X...")
-scaler = StandardScaler()
-xTrain = scaler.fit_transform(xTrain)
-xTest = scaler.transform(xTest)
+    logger.info("Building SVM...")
+    svm = SVC(kernel='rbf', random_state=114514)
 
-print("Building SVM...")
-svm = SVC(kernel='rbf', random_state=114514)
+    logger.info("Finding best args...")
+    params = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001]}
+    gridSearch = GridSearchCV(svm, params, scoring='accuracy', n_jobs=8)
+    gridSearch.fit(xTrain, yTrain)
 
-print("Finding best args...")
-params = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001]}
-gridSearch = GridSearchCV(svm, params, scoring='accuracy', n_jobs=8)
-gridSearch.fit(xTrain, yTrain)
+    logger.info("Fitting model...")
+    bestSvm = gridSearch.best_estimator_
+    bestSvm.fit(xTrain, yTrain)
 
-print("Fitting model...")
-bestSvm = gridSearch.best_estimator_
-bestSvm.fit(xTrain, yTrain)
+    logger.info("Predicting...")
+    yPred = bestSvm.predict(xTest)
+    accuracy = accuracy_score(yTest, yPred)
+    print(f"Accuracy: {accuracy:.2f}")
 
-print("Predicting...")
-yPred = bestSvm.predict(xTest)
-accuracy = accuracy_score(yTest, yPred)
-print(f"Accuracy: {accuracy:.2f}")
+if __name__ == "__main__":
+    main()
