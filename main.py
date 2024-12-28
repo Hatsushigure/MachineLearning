@@ -5,12 +5,11 @@ from skimage.color import rgb2gray
 import skimage.transform as transform
 import matplotlib.pyplot as plt
 from pathlib import Path
-
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-
+import random
 
 # Get all image name
 def getImageName(imgPathStr):
@@ -34,7 +33,11 @@ def processImage(imgList):
         if filename.name.startswith("cat"):
             isCat = 1
 
-        image = imread(filename)
+        try:
+            image = imread(filename)
+        except OSError as e:
+            print(f"Cannot open image file {filename.name} bacause\n{e}")
+            continue
         image = transform.resize(image, (256, 256))
         grayImage = rgb2gray(image)
 
@@ -60,10 +63,10 @@ def processImage(imgList):
             xData = np.vstack((xData, totalFeature))
 
         if yData is None:
-            yData = np.vstack([isCat])
+            yData = [isCat]
         else:
-            yData = np.vstack((yData, [isCat]))
-        print(f"processing image {index}...")
+            yData.append(isCat)
+        print(f"processing image {filename.name} ({index}/{len(imgList)})...")
         index += 1
     return xData, yData
 
@@ -72,22 +75,29 @@ randomPath = "../AnimalData/random"
 
 imgList = getImageName(catPath)
 imgList.extend(getImageName(randomPath))
+random.shuffle(imgList)
+imgList = imgList[0 : 1000]
 xData, yData = processImage(imgList)
 xTrain, xTest, yTrain, yTest = train_test_split(xData, yData, test_size=0.2, random_state=114514)
 
+print("Scaling X...")
 scaler = StandardScaler()
 xTrain = scaler.fit_transform(xTrain)
 xTest = scaler.transform(xTest)
 
+print("Building SVM...")
 svm = SVC(kernel='rbf', random_state=114514)
 
+print("Finding best args...")
 params = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001]}
 gridSearch = GridSearchCV(svm, params, cv=5, scoring='accuracy')
 gridSearch.fit(xTrain, yTrain)
 
+print("Fitting model...")
 bestSvm = gridSearch.best_estimator_
 bestSvm.fit(xTrain, yTrain)
 
+print("Predicting...")
 yPred = bestSvm.predict(xTest)
 accuracy = accuracy_score(yTest, yPred)
 print(f"Accuracy: {accuracy:.2f}")
