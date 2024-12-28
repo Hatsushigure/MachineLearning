@@ -37,7 +37,7 @@ maxWidth = 1024
 minWidth = 128
 urls = []
 filenames = []
-for imgId in range(765, 766):
+for imgId in range(1300, 1301):
     width = random.randint(minWidth, maxWidth)
     height = random.randint(minWidth, maxWidth)
     url = f"https://picsum.photos/{width}/{height}.jpg?random={imgId}"

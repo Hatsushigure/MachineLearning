@@ -1,24 +1,17 @@
 from sys import stdout
-import skimage.feature as imgfeature
-import numpy as np
-from skimage.io import imread
-from skimage.color import rgb2gray
-from skimage.util import img_as_int
-import skimage.transform as transform
-import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
+from ImgPreprocessor import processAllImage
+from joblib import dump
 import random
-from joblib import Parallel, delayed
 import logging
-import time
+import argparse
 
 catPath = "../AnimalData/cat-db"
 randomPath = "../AnimalData/random"
-pictureCount = 1000
 logger = logging.getLogger(__name__)
 
 # Get all image name
@@ -33,78 +26,12 @@ def getImageName(imgPathStr):
             imgList.append(item)
     return imgList
 
-# Process single image
-def processImage(filePath, currentId, totalCount):
-    logging.basicConfig(stream=stdout, 
-                    level=logging.INFO,
-                    format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
-                    datefmt='%Y-%m-%d %H:%M:%S'
-                    )
-    logger.info(f"Processing image {filePath.name} ({currentId}/{totalCount})...")
-    isCat = 0
-    if filePath.name.startswith("cat"):
-        isCat = 1
-
-    try:
-        image = imread(filePath)
-    except OSError as e:
-        logger.warning(f"Cannot open image file {filePath.name} bacause\n{e}")
-        return None, None
-    
-    image = transform.resize(image, (128, 128))
-    grayImage = rgb2gray(image)
-
-    hogFeature = imgfeature.hog(grayImage,
-                                orientations=9,
-                                pixels_per_cell=(8, 8),
-                                cells_per_block=(2, 2),
-                                visualize=False,
-                                block_norm='L2-Hys'
-                                )
-    
-    lbpRadius = 3
-    lbpPoint = 3 * lbpRadius
-    lbp = imgfeature.local_binary_pattern(img_as_int(grayImage), R=lbpRadius, P=lbpPoint)
-    binsCount = int(lbp.max() + 1)
-    lbpHist, _ = np.histogram(lbp.ravel(), 
-                              density=True, 
-                              bins=binsCount, 
-                              range=(0, binsCount)
-                              )
-    
-    totalFeature = np.concatenate((hogFeature, lbpHist))
-    logger.info(f"File {filePath.name} processing completed")
-    return totalFeature, isCat
-    
-# Process all image
-def processAllImage(imgList):
-    xData = None
-    yData = None
-    processJobCount = 8
-
-    logger.info(f"Processing all images with {processJobCount} jobs...")
-    st = time.time()
-    resultList = Parallel(n_jobs=processJobCount, return_as="generator_unordered")(
-        delayed(processImage)(filePath, currentId, len(imgList)) 
-            for filePath, currentId in zip(imgList, range(1, len(imgList) + 1))
-        )
-
-    for totalFeature, isCat in resultList:
-        if totalFeature is None or isCat is None:
-            continue
-
-        if xData is None:
-            xData = totalFeature
-        else:
-            xData = np.vstack((xData, totalFeature))
-
-        if yData is None:
-            yData = [isCat]
-        else:
-            yData.append(isCat)
-    et = time.time()
-    logger.info(f"Processing completed, costing {et - st:.4f} seconds")
-    return xData, yData
+def getImgData(count):
+    imgList = getImageName(catPath)
+    imgList.extend(getImageName(randomPath))
+    random.shuffle(imgList)
+    imgList = imgList[0 : count]
+    return processAllImage(imgList)
 
 def main():
     logging.basicConfig(stream=stdout, 
@@ -113,11 +40,15 @@ def main():
                         datefmt='%Y-%m-%d %H:%M:%S'
                         )
     logger.info("Program started")
-    imgList = getImageName(catPath)
-    imgList.extend(getImageName(randomPath))
-    random.shuffle(imgList)
-    imgList = imgList[0 : pictureCount]
-    xData, yData = processAllImage(imgList)
+
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--datasetSize", "-s", required=True, type=int)
+    argparser.add_argument("--dumpModel", "-d", default=True, type=bool)
+    argNamespace = argparser.parse_args()
+    pictureCount = argNamespace.datasetSize
+    doDumpModel = argNamespace.dumpModel
+ 
+    xData, yData = getImgData(pictureCount)
     xTrain, xTest, yTrain, yTest = train_test_split(xData, 
                                                     yData, 
                                                     test_size=0.2, 
@@ -139,6 +70,12 @@ def main():
     yPred = svm.predict(xTest)
     accuracy = accuracy_score(yTest, yPred)
     print(f"Accuracy: {accuracy:.2f}")
+
+    if doDumpModel:
+        logger.info(f"Model saved to ./generated/svm.{pictureCount}.dmp")
+        if not Path("./generated").exists():
+            Path.mkdir("./generated")
+        dump(svm, f"./generated/svm.{pictureCount}.dmp")
 
 if __name__ == "__main__":
     main()
