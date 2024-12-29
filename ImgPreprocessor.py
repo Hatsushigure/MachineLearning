@@ -5,6 +5,7 @@ from skimage.feature import hog, local_binary_pattern
 from skimage.util import img_as_int
 import skimage.transform as transform
 from joblib import Parallel, delayed
+from pathlib import Path
 import logging
 import time
 import numpy as np
@@ -12,7 +13,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Process single image
-def processImage(filePath, currentId, totalCount):
+def processImage(filePath : Path, currentId=0, totalCount=1):
     logging.basicConfig(stream=stdout, 
                     level=logging.INFO,
                     format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',

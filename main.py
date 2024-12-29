@@ -1,21 +1,19 @@
 from sys import stdout
 from pathlib import Path
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
-from ImgPreprocessor import processAllImage
+from ImgPreprocessor import processAllImage, processImage
 from joblib import dump
+from ModelGenerator import trainModel, loadModel
 import random
 import logging
 import argparse
+import numpy as np
 
 catPath = "../AnimalData/cat-db"
 randomPath = "../AnimalData/random"
 logger = logging.getLogger(__name__)
 
 # Get all image name
-def getImageName(imgPathStr):
+def getImageName(imgPathStr : str):
     logger.info(f"Getting filenames from '{imgPathStr}'...")
     imgList = []
     imgPath = Path(imgPathStr)
@@ -26,12 +24,26 @@ def getImageName(imgPathStr):
             imgList.append(item)
     return imgList
 
-def getImgData(count):
+# Get data for training model
+def getTrainImgData(count : int):
     imgList = getImageName(catPath)
     imgList.extend(getImageName(randomPath))
     random.shuffle(imgList)
     imgList = imgList[0 : count]
     return processAllImage(imgList)
+
+# Runs in train mode
+def trainMode(pictureCount, doDumpModel):
+    logger.info(f"Program is working in training mode, with dataset size {pictureCount}, and will {"" if doDumpModel else "not "}save the model")
+
+    xData, yData = getTrainImgData(pictureCount)
+    svm = trainModel(xData, yData)
+
+    if doDumpModel:
+        logger.info(f"Model saved to ./generated/svm.{pictureCount}.dmp")
+        if not Path("./generated").exists():
+            Path.mkdir("./generated")
+        dump(svm, f"./generated/svm.{pictureCount}.dmp")
 
 def main():
     logging.basicConfig(stream=stdout, 
@@ -39,43 +51,60 @@ def main():
                         format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S'
                         )
+
+    argparser = argparse.ArgumentParser(prog="CatRecognition",
+                                        description="A program to train models and recognize image with cats"
+                                        )
+    subparsers = argparser.add_subparsers(title="subcommands",
+                                          help="Available working mode",
+                                          dest="workingMode"
+                                          )
+    subparserTrain = subparsers.add_parser("train", 
+                                           help="Training models based on data"
+                                           )
+    subparserTrain.add_argument("--datasetSize", 
+                           "-s", 
+                           required=True, 
+                           type=int,
+                           help="Count of images chosen to train the model (required)"
+                           )
+    subparserTrain.add_argument("--dumpModel", 
+                           "-d", 
+                           choices=["on", "off"], 
+                           default="on",
+                           help="Whether to dump the model to file"
+                           )
+    subparserPredict = subparsers.add_parser("predict",
+                                             help="Predict image content with trained model"
+                                             )
+    subparserPredict.add_argument("--model", 
+                                  "-m",
+                                  metavar="modelPath",
+                                  required=True,
+                                  help="The path to model file"
+                                  )
+    subparserPredict.add_argument("imagePath",
+                                  help="Path to the image file to predict")
+    argNamespace = argparser.parse_args()
+    workingMode = argNamespace.workingMode
+ 
     logger.info("Program started")
 
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument("--datasetSize", "-s", required=True, type=int)
-    argparser.add_argument("--dumpModel", "-d", default=True, type=bool)
-    argNamespace = argparser.parse_args()
-    pictureCount = argNamespace.datasetSize
-    doDumpModel = argNamespace.dumpModel
- 
-    xData, yData = getImgData(pictureCount)
-    xTrain, xTest, yTrain, yTest = train_test_split(xData, 
-                                                    yData, 
-                                                    test_size=0.2, 
-                                                    random_state=114514
-                                                    )
-
-    logger.info("Scaling X...")
-    scaler = StandardScaler()
-    xTrain = scaler.fit_transform(xTrain)
-    xTest = scaler.transform(xTest)
-
-    logger.info("Building SVM...")
-    svm = SVC(kernel='rbf', C=100000, random_state=114514)
-
-    logger.info("Fitting model...")
-    svm.fit(xTrain, yTrain)
-
-    logger.info("Predicting...")
-    yPred = svm.predict(xTest)
-    accuracy = accuracy_score(yTest, yPred)
-    print(f"Accuracy: {accuracy:.2f}")
-
-    if doDumpModel:
-        logger.info(f"Model saved to ./generated/svm.{pictureCount}.dmp")
-        if not Path("./generated").exists():
-            Path.mkdir("./generated")
-        dump(svm, f"./generated/svm.{pictureCount}.dmp")
+    if workingMode == "train":
+        pictureCount = argNamespace.datasetSize
+        doDumpModel = True if argNamespace.dumpModel == "on" else False
+        trainMode(pictureCount, doDumpModel) 
+    elif workingMode == "predict":
+        logger.info(f"Program is working in training mode")
+        modelPath = Path(argNamespace.model)
+        imagePath = Path(argNamespace.imagePath)
+        logger.info(f"Image path: '{imagePath}'")
+        logger.info(f"Model path: '{modelPath}'")
+        processedImage, _ = processImage(imagePath)
+        processedImage = np.vstack((processedImage,))
+        svm = loadModel(Path(modelPath))
+        result = svm.predict(processedImage)
+        print(f"Result: {result[0]}")
 
 if __name__ == "__main__":
     main()
