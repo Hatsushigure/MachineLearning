@@ -13,8 +13,8 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Process single image
-def processImage(filePath : Path, currentId=0, totalCount=1):
-    logging.basicConfig(stream=stdout, 
+def processImage(filePath : Path, logFilePath : Path, currentId=0, totalCount=1):
+    logging.basicConfig(filename=logFilePath, 
                     level=logging.INFO,
                     format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S'
@@ -56,7 +56,7 @@ def processImage(filePath : Path, currentId=0, totalCount=1):
     return totalFeature, isCat
     
 # Process all image
-def processAllImage(imgList):
+def processAllImage(imgList, logFilePath : Path):
     xData = None
     yData = None
     processJobCount = 8
@@ -64,7 +64,7 @@ def processAllImage(imgList):
     logger.info(f"Processing all images with {processJobCount} jobs...")
     st = time.time()
     resultList = Parallel(n_jobs=processJobCount, return_as="generator_unordered")(
-        delayed(processImage)(filePath, currentId, len(imgList)) 
+        delayed(processImage)(filePath, logFilePath, currentId, len(imgList)) 
             for filePath, currentId in zip(imgList, range(1, len(imgList) + 1))
         )
 

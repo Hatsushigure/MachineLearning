@@ -25,7 +25,7 @@ def trainModel(xData, yData):
                                                     )
     
     logger.info("Scaling X...")
-    scaler = StandardScaler()
+    # scaler = StandardScaler()
     # xTrain = scaler.fit_transform(xTrain)
     # xTest = scaler.transform(xTest)
 

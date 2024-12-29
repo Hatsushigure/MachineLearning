@@ -1,4 +1,3 @@
-from sys import stdout
 from pathlib import Path
 from ImgPreprocessor import processAllImage, processImage
 from joblib import dump
@@ -6,11 +5,14 @@ from ModelGenerator import trainModel, loadModel
 import random
 import logging
 import argparse
+import datetime
 import numpy as np
 
 catPath = "../AnimalData/cat-db"
 randomPath = "../AnimalData/random"
 logger = logging.getLogger(__name__)
+currentDatetime = datetime.datetime.now()
+logFilePath = Path(f"./logs/{currentDatetime.year}-{currentDatetime.month:0>2}-{currentDatetime.day:0>2}_{currentDatetime.hour:0>2}_{currentDatetime.minute:0>2}_{currentDatetime.second:0>2}.log")
 
 # Get all image name
 def getImageName(imgPathStr : str):
@@ -30,7 +32,7 @@ def getTrainImgData(count : int):
     imgList.extend(getImageName(randomPath))
     random.shuffle(imgList)
     imgList = imgList[0 : count]
-    return processAllImage(imgList)
+    return processAllImage(imgList, logFilePath)
 
 # Runs in train mode
 def trainMode(pictureCount, doDumpModel):
@@ -46,7 +48,7 @@ def trainMode(pictureCount, doDumpModel):
         dump(svm, f"./generated/svm.{pictureCount}.dmp")
 
 def main():
-    logging.basicConfig(stream=stdout, 
+    logging.basicConfig(filename=logFilePath,
                         level=logging.INFO,
                         format='[%(asctime)s %(levelname)s] %(name)s:%(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S'
@@ -100,7 +102,7 @@ def main():
         imagePath = Path(argNamespace.imagePath)
         logger.info(f"Image path: '{imagePath}'")
         logger.info(f"Model path: '{modelPath}'")
-        processedImage, _ = processImage(imagePath)
+        processedImage, _ = processImage(imagePath, logFilePath)
         processedImage = np.vstack((processedImage,))
         svm = loadModel(Path(modelPath))
         result = svm.predict(processedImage)
